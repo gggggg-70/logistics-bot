@@ -1,276 +1,238 @@
-import asyncio
-import logging
-import re
-from aiogram import Bot, Dispatcher, F
-from aiogram.filters import CommandStart
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
-from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+import telebot
+from telebot import types
 
-# 1. ТОКЕН И ЛОГИРОВАНИЕ
 TOKEN = "9227198609:AAE6T_N62JKbJV125rt4OvannRTCkG-DE9M"
+bot = telebot.TeleBot(TOKEN)
 
-logging.basicConfig(
-    filename="bot_log.txt",
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-)
+users = {}
 
-bot = Bot(token=TOKEN)
-storage = MemoryStorage()
-dp = Dispatcher(storage=storage)
-
-# 2. БАЗЫ ДАННЫХ В ПАМЯТИ
-users_db = {}     # Профили пользователей, языки, роли, рейтинги
-freight_db = []   # Реестр заявок на грузы
-drivers_crm = {}  # CRM водителей и парсинга
-
-# 3. ПОЛНЫЕ СЛОВАРИ НА 5 ЯЗЫКОВ
-LANGS = {
-    "ru": {
-        "choose_lang": "🌍 Выберите язык / Тілді таңдаңыз:",
-        "rules": "📄 **Соглашение посредника:**\nСервис соединяет владельцев грузов и водителей (КЗ, РФ, УЗ, КНР). Все расчеты через диспетчера.",
-        "agree": "✅ Согласен с условиями",
-        "reject": "❌ Отказаться",
-        "rejected": "❌ Вы отказались. Нажмите /start для перезапуска.",
-        "role_select": "👥 **Выберите вашу роль в системе:**",
-        "shipper": "📦 Владелец груза (Отправитель)",
-        "driver": "🚚 Перевозчик / Водитель",
-        "main_menu": "🏠 **Главное меню диспетчерского центра**",
-        "btn_add": "➕ Разместить груз",
-        "btn_search": "🔍 Найти грузы / Маршруты",
-        "btn_profile": "👤 Мой профиль",
-        "ask_route": "📍 Введите маршрут перевозки (Откуда — Куда):",
-        "success_post": "✅ Заявка принята в общую базу и отправлена в рассылку!",
+TEXTS = {
+    'ru': {
+        'choose_lang': "🌍 Выберите язык / Тілді таңдаңыз:",
+        'rules': "📄 **Соглашение посредника:**\n\nСервис соединяет владельцев грузов и водителей/перевозчиков (РК, РФ, РУЗ, КНР). Все расчеты и условия фиксируются через диспетчера.",
+        'agree': "✅ Согласен с условиями",
+        'reject': "❌ Отказаться",
+        'rejected': "❌ Вы отказались. Для перезапуска нажмите /start",
+        'role_select': "👥 **Выберите вашу роль в системе:**",
+        'shipper': "📦 Владелец груза (Отправитель)",
+        'driver': "🚚 Перевозчик / Водитель (Газелист/Фурист)",
+        'main_menu': "🏠 **Главное меню посредника**",
+        'btn_add': "➕ Разместить груз",
+        'btn_search': "🔍 Найти груз / Маршруты",
+        'btn_my': "📋 Мои заявки",
+        'btn_contact': "📞 Связаться с диспетчером",
+        'route_choose': "📍 Выберите направление перевозки:",
+        'ask_desc': "📝 Опишите ваш груз (Откуда, куда, вес/объем, тип машины и желаемая ставка):",
+        'success_post': "✅ Заявка успешно принята! Диспетчер свяжется с вами для подтверждения.",
+        'no_loads': "📭 На данный момент свободных грузов по этому направлению нет.",
+        'back': "⬅️ Назад в меню"
     },
-    "kz": {
-        "choose_lang": "🌍 Тілді таңдаңыз / Выберите язык:",
-        "rules": "📄 **Делдалдық келісім:**\nСервис жүк иелері мен тасымалдаушыларды байланыстырады (ҚР, РФ, ӨЗБ, ҚХР). Барлық есеп айырысу диспетчер арқылы.",
-        "agree": "✅ Шарттармен келісемін",
-        "reject": "❌ Бас тарту",
-        "rejected": "❌ Сіз бас тарттыңыз. Қайта бастау үшін /start басыңыз.",
-        "role_select": "👥 **Жүйедегі рөліңізді таңдаңыз:**",
-        "shipper": "📦 Жүк иесі (Тапсырыс беруші)",
-        "driver": "🚚 Тасымалдаушы / Жүргізуші",
-        "main_menu": "🏠 **Диспетчерлік орталықтың басты мәзірі**",
-        "btn_add": "➕ Жүкті орналастыру",
-        "btn_search": "🔍 Жүк іздеу / Бағыттар",
-        "btn_profile": "👤 Менің профилім",
-        "ask_route": "📍 Тасымалдау бағытын енгізіңіз (Қайдан — Қайда):",
-        "success_post": "✅ Тапсырыс базаға қабылданды және таратуға жіберілді!",
+    'kz': {
+        'choose_lang': "🌍 Тілді таңдаңыз / Выберите язык:",
+        'rules': "📄 **Делдалдық келісім:**\n\nСервис жүк иелері мен тасымалдаушыларды байланыстырады (ҚР, РФ, ӨЗБ, ҚХР). Барлық шарттар диспетчер арқылы бекітіледі.",
+        'agree': "✅ Шарттармен келісемін",
+        'reject': "❌ Бас тарту",
+        'rejected': "❌ Сіз бас тарттыңыз. Қайта бастау үшін /start басыңыз",
+        'role_select': "👥 **Жүйедегі рөліңізді таңдаңыз:**",
+        'shipper': "📦 Жүк иесі (Тапсырыс беруші)",
+        'driver': "🚚 Тасымалдаушы / Жүргізуші",
+        'main_menu': "🏠 **Делдалдың басты мәзірі**",
+        'btn_add': "➕ Жүкті орналастыру",
+        'btn_search': "🔍 Жүк іздеу / Бағыттар",
+        'btn_my': "📋 Менің тапсырыстарым",
+        'btn_contact': "📞 Диспетчермен хабарласу",
+        'route_choose': "📍 Тасымалдау бағытын таңдаңыз:",
+        'ask_desc': "📝 Жүкті сипаттаңыз (Қайдан, қайда, салмағы/көлемі, көлік түрі және бағасы):",
+        'success_post': "✅ Тапсырыс қабылданды! Диспетчер жақын арада хабарласады.",
+        'no_loads': "📭 Бұл бағытта әзірге бос жүктер жоқ.",
+        'back': "⬅️ Мәзірге оралу"
     },
-    "en": {
-        "choose_lang": "🌍 Select language:",
-        "rules": "📄 **Intermediary Agreement:**\nService connects cargo owners and carriers (KZ, RU, UZ, CN). All settlements via dispatcher.",
-        "agree": "✅ Agree",
-        "reject": "❌ Decline",
+    'en': {
+        'choose_lang': "🌍 Select language:",
+        'rules': "📄 **Intermediary Agreement:**\n\nService connects cargo owners and carriers (KZ, RU, UZ, CN). All terms are handled via dispatcher.",
+        'agree': "✅ Agree",
+        'reject': "❌ Decline",
         'rejected': "❌ You declined. Press /start to restart.",
-        "role_select": "👥 **Select your role:**",
-        "shipper": "📦 Cargo Owner (Shipper)",
-        "driver": "🚚 Carrier / Driver",
-        "main_menu": "🏠 **Main Dispatch Center Menu**",
-        "btn_add": "➕ Post Cargo",
-        "btn_search": "🔍 Search Cargoes / Routes",
-        "btn_profile": "👤 My Profile",
-        "ask_route": "📝 Enter transport route (From — To):",
-        "success_post": "✅ Cargo posted successfully and sent to dispatch!",
+        'role_select': "👥 **Select your role:**",
+        'shipper': "📦 Cargo Owner (Shipper)",
+        'driver': "🚚 Carrier / Driver",
+        'main_menu': "🏠 **Main Intermediary Menu**",
+        'btn_add': "➕ Post Cargo",
+        'btn_search': "🔍 Search Cargoes / Routes",
+        'btn_my': "📋 My Orders",
+        'btn_contact': "📞 Contact Dispatcher",
+        'route_choose': "📍 Select transport route:",
+        'ask_desc': "📝 Enter cargo details (From, To, Weight/Volume, Truck type, Target rate):",
+        'success_post': "✅ Cargo posted successfully! Dispatcher will contact you soon.",
+        'no_loads': "📭 No active cargoes available for this route.",
+        'back': "⬅️ Back to menu"
     },
-    "uz": {
-        "choose_lang": "🌍 Tilni tanlang:",
-        "rules": "📄 **Vositachilik shartnomasi:**\nXizmat yuk egalari va tashuvchilarni bog'laydi (QZ, RU, UZ, CN). Barcha hisob-kitoblar dispetcher orqali.",
-        "agree": "✅ Roziman",
-        "reject": "❌ Rad etish",
-        "rejected": "❌ Rad etdingiz. Qaytadan boshlash uchun /start bosing.",
-        "role_select": "👥 **Rolingizni tanlang:**",
-        "shipper": "📦 Yuk egasi",
-        "driver": "🚚 Tashuvchi / Haydovchi",
-        "main_menu": "🏠 **Asosiy dispetcherlik menyusi**",
-        "btn_add": "➕ Yuk joylashtirish",
-        "btn_search": "🔍 Yuklarni qidirish",
-        "btn_profile": "👤 Mening profilim",
-        "ask_route": "📝 Yo'nalishni kiriting (Qayerdan — Qayerga):",
-        "success_post": "✅ Buyurtma bazaga qo'shildi va tarqatishga yuborildi!",
+    'uz': {
+        'choose_lang': "🌍 Tilni tanlang:",
+        'rules': "📄 **Vositachilik shartnomasi:**\n\nXizmat yuk egalari va tashuvchilarni bog'laydi (QZ, RU, UZ, CN). Barcha shartlar dispetcher orqali hal qilinadi.",
+        'agree': "✅ Roziman",
+        'reject': "❌ Rad etish",
+        'rejected': "❌ Rad etdingiz. Qaytadan boshlash uchun /start bosing.",
+        'role_select': "👥 **Rolingizni tanlang:**",
+        'shipper': "📦 Yuk egasi",
+        'driver': "🚚 Tashuvchi / Haydovchi",
+        'main_menu': "🏠 **Asosiy menyu**",
+        'btn_add': "➕ Yuk joylashtirish",
+        'btn_search': "🔍 Yuklarni qidirish",
+        'btn_my': "📋 Mening buyurtmalarim",
+        'btn_contact': "📞 Dispetcher bilan bog'lanish",
+        'route_choose': "📍 Yo'nalishni tanlang:",
+        'ask_desc': "📝 Yuk tavsifini kiriting (Qayerdan, qayerga, vazni, mashina turi va narxi):",
+        'success_post': "✅ Buyurtma qabul qilindi! Tez orada dispetcher bog'lanadi.",
+        'no_loads': "📭 Hozircha bu yo'nalishda yuklar yo'q.",
+        'back': "⬅️ Menюga qaytish"
     },
-    "cn": {
-        "choose_lang": "🌍 选择语言:",
-        "rules": "📄 **中介服务协议：**\n本平台连接货主与承运人（哈萨克斯坦、俄罗斯、乌兹别克斯坦、中国）。所有结算通过调度员进行。",
-        "agree": "✅ 同意条款",
-        "reject": "❌ 拒绝",
-        "rejected": "❌ 您已拒绝。请按 /start 重新开始。",
-        "role_select": "👥 **选择您的身份：**",
-        "shipper": "📦 货主",
-        "driver": "🚚 承运人 / 司机",
-        "main_menu": "🏠 **调度中心主菜单**",
-        "btn_add": "➕ 发布货物",
-        "btn_search": "🔍 查找货源 / 路线",
-        "btn_profile": "👤 我的资料",
-        "ask_route": "📝 请输入运输路线（起止地）：",
-        "success_post": "✅ 货源已成功发布并进入推送队列！",
-    },
+    'zh': {
+        'choose_lang': "🌍 选择语言:",
+        'rules': "📄 **中介服务协议：**\n\n本平台连接货主与承运人（哈萨克斯坦、俄罗斯、乌兹别克斯坦、中国）。所有订单由调度员跟进。",
+        'agree': "✅ 同意条款",
+        'reject': "❌ 拒绝",
+        'rejected': "❌ 您已拒绝。请按 /start 重新开始。",
+        'role_select': "👥 **选择您的身份：**",
+        'shipper': "📦 货主",
+        'driver': "🚚 承运人 / 司机",
+        'main_menu': "🏠 **主菜单**",
+        'btn_add': "➕ 发布货物",
+        'btn_search': "🔍 查找货源 / 路线",
+        'btn_my': "📋 我的订单",
+        'btn_contact': "📞 联系调度员",
+        'route_choose': "📍 选择运输路线：",
+        'ask_desc': "📝 请输入货物详情（起止地、重量/体积、车型及期望运费）：",
+        'success_post': "✅ 货源已成功发布！调度员将尽快与您联系。",
+        'no_loads': "📭 该路线目前暂无可用货源。",
+        'back': "⬅️ 返回主菜单"
+    }
 }
 
-def get_text(user_id: int, key: str) -> str:
-    lang = users_db.get(user_id, {}).get("lang", "ru")
-    return LANGS.get(lang, LANGS["ru"]).get(key, key)
-
-# 4. FSM СОСТОЯНИЯ ДЛЯ ПОДАЧИ ГРУЗА
-class OrderState(StatesGroup):
-    route = State()
-
-# 5. СТАРТ И ВЫБОР ЯЗЫКА
-@dp.message(CommandStart())
-async def cmd_start(message: Message, state: FSMContext):
-    await state.clear()
-    uid = message.from_user.id
+@bot.message_handler(commands=['start'])
+def cmd_start(message):
+    cid = message.chat.id
+    users[cid] = {'lang': 'ru', 'role': None, 'state': None}
     
-    if uid not in users_db:
-        users_db[uid] = {
-            "lang": "ru", 
-            "role": "none", 
-            "rating": 100, 
-            "is_paid_restored": False,
-            "username": message.from_user.username or "нет"
-        }
-    
-    markup = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="🇷🇺 Русский", callback_data="lang_ru"),
-            InlineKeyboardButton(text="🇰🇿 Қазақша", callback_data="lang_kz"),
-        ],
-        [
-            InlineKeyboardButton(text="🇬🇧 English", callback_data="lang_en"),
-            InlineKeyboardButton(text="🇺🇿 O'zbek", callback_data="lang_uz"),
-            InlineKeyboardButton(text="🇨🇳 中文", callback_data="lang_zh"),
-        ]
-    ])
-    await message.answer("🌍 Выберите язык / Tілді таңдаңыз / Select language:", reply_markup=markup)
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        types.InlineKeyboardButton("🇷🇺 Русский", callback_data="lang_ru"),
+        types.InlineKeyboardButton("🇰🇿 Қазақша", callback_data="lang_kz"),
+        types.InlineKeyboardButton("🇬🇧 English", callback_data="lang_en"),
+        types.InlineKeyboardButton("🇺🇿 O'zbek", callback_data="lang_uz"),
+        types.InlineKeyboardButton("🇨🇳 中文", callback_data="lang_zh")
+    )
+    bot.send_message(cid, TEXTS['ru']['choose_lang'], reply_markup=markup)
 
-@dp.callback_query(F.data.startswith("lang_"))
-async def set_lang(callback: CallbackQuery):
-    uid = callback.from_user.id
-    lang = callback.data.split("_")[1]
-    if uid in users_db:
-        users_db[uid]["lang"] = lang
-    
-    t = LANGS.get(lang, LANGS["ru"])
-    markup = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=t["agree"], callback_data="rules_ok")],
-        [InlineKeyboardButton(text=t["reject"], callback_data="rules_no")]
-    ])
-    await callback.message.edit_text(t["rules"], parse_mode="Markdown", reply_markup=markup)
-    await callback.answer()
+@bot.callback_query_handler(func=lambda call: call.data.startswith('lang_'))
+def cb_lang(call):
+    cid = call.message.chat.id
+    lang = call.data.split('_')[1]
+    if cid not in users:
+        users[cid] = {}
+    users[cid]['lang'] = lang
+    t = TEXTS[lang]
 
-@dp.callback_query(F.data.startswith("rules_"))
-async def cb_rules(callback: CallbackQuery):
-    uid = callback.from_user.id
-    lang = users_db.get(uid, {}).get("lang", "ru")
-    t = LANGS.get(lang, LANGS["ru"])
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        types.InlineKeyboardButton(t['agree'], callback_data="rules_ok"),
+        types.InlineKeyboardButton(t['reject'], callback_data="rules_no")
+    )
+    bot.edit_message_text(t['rules'], cid, call.message.message_id, parse_mode='Markdown', reply_markup=markup)
 
-    if callback.data == "rules_no":
-        await callback.message.edit_text(t["rejected"])
+@bot.callback_query_handler(func=lambda call: call.data.startswith('rules_'))
+def cb_rules(call):
+    cid = call.message.chat.id
+    lang = users.get(cid, {}).get('lang', 'ru')
+    t = TEXTS[lang]
+
+    if call.data == 'rules_no':
+        bot.edit_message_text(t['rejected'], cid, call.message.message_id)
         return
 
-    markup = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=t["shipper"], callback_data="role_shipper")],
-        [InlineKeyboardButton(text=t["driver"], callback_data="role_driver")]
-    ])
-    await callback.message.edit_text(t["role_select"], parse_mode="Markdown", reply_markup=markup)
-    await callback.answer()
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        types.InlineKeyboardButton(t['shipper'], callback_data="role_shipper"),
+        types.InlineKeyboardButton(t['driver'], callback_data="role_driver")
+    )
+    bot.edit_message_text(t['role_select'], cid, call.message.message_id, parse_mode='Markdown', reply_markup=markup)
 
-@dp.callback_query(F.data.startswith("role_"))
-async def cb_role(callback: CallbackQuery):
-    uid = callback.from_user.id
-    role = callback.data.split("_")[1]
-    if uid in users_db:
-        users_db[uid]["role"] = role
+@bot.callback_query_handler(func=lambda call: call.data.startswith('role_'))
+def cb_role(call):
+    cid = call.message.chat.id
+    role = call.data.split('_')[1]
+    if cid not in users:
+        users[cid] = {'lang': 'ru'}
+    users[cid]['role'] = role
+    lang = users[cid]['lang']
     
-    await show_main_menu(callback.message, uid)
-    await callback.answer()
+    send_main_menu(cid, lang, call.message.message_id)
 
-async def show_main_menu(message: Message, uid: int):
-    lang = users_db.get(uid, {}).get("lang", "ru")
-    t = LANGS.get(lang, LANGS["ru"])
+def send_main_menu(cid, lang, msg_id=None):
+    t = TEXTS[lang]
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        types.InlineKeyboardButton(t['btn_add'], callback_data="menu_add"),
+        types.InlineKeyboardButton(t['btn_search'], callback_data="menu_search"),
+        types.InlineKeyboardButton(t['btn_my'], callback_data="menu_my"),
+        types.InlineKeyboardButton(t['btn_contact'], callback_data="menu_contact")
+    )
+    if msg_id:
+        bot.edit_message_text(t['main_menu'], cid, msg_id, parse_mode='Markdown', reply_markup=markup)
+    else:
+        bot.send_message(cid, t['main_menu'], parse_mode='Markdown', reply_markup=markup)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('menu_'))
+def cb_menu(call):
+    cid = call.message.chat.id
+    action = call.data.split('_')[1]
+    lang = users.get(cid, {}).get('lang', 'ru')
+    t = TEXTS[lang]
+
+    if action == 'add':
+        users[cid]['state'] = 'waiting_cargo'
+        bot.send_message(cid, t['ask_desc'])
+    elif action == 'search':
+        markup = types.InlineKeyboardMarkup(row_width=2)
+        markup.add(
+            types.InlineKeyboardButton("🇰🇿 Казахстан", callback_data="reg_kz"),
+            types.InlineKeyboardButton("🇷🇺 Россия", callback_data="reg_ru"),
+            types.InlineKeyboardButton("🇺🇿 Узбекистан", callback_data="reg_uz"),
+            types.InlineKeyboardButton("🇨🇳 Китай", callback_data="reg_cn"),
+            types.InlineKeyboardButton(t['back'], callback_data="menu_back")
+        )
+        bot.edit_message_text(t['route_choose'], cid, call.message.message_id, reply_markup=markup)
+    elif action == 'my':
+        bot.answer_callback_query(call.id, "Список ваших заявок пуст")
+        bot.send_message(cid, "📋 У вас пока нет активных заявок в системе.")
+    elif action == 'contact':
+        bot.send_message(cid, "📞 Контакты диспетчера-посредника:\nTelegram: @vsegruzy_admin\nТелефон / WhatsApp: +7 (700) 000-00-00")
+    elif action == 'back':
+        send_main_menu(cid, lang, call.message.message_id)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('reg_'))
+def cb_region(call):
+    cid = call.message.chat.id
+    lang = users.get(cid, {}).get('lang', 'ru')
+    t = TEXTS[lang]
+    bot.answer_callback_query(call.id)
+    bot.send_message(cid, t['no_loads'])
+
+@bot.message_handler(func=lambda msg: users.get(msg.chat.id, {}).get('state') == 'waiting_cargo')
+def text_cargo_handler(msg):
+    cid = msg.chat.id
+    lang = users.get(cid, {}).get('lang', 'ru')
+    t = TEXTS[lang]
     
-    markup = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=t["btn_add"], callback_data="menu_add")],
-        [InlineKeyboardButton(text=t["btn_profile"], callback_data="menu_profile")]
-    ])
-    await message.answer(t["main_menu"], parse_mode="Markdown", reply_markup=markup)
+    users[cid]['state'] = None
+    bot.send_message(cid, t['success_post'])
+    send_main_menu(cid, lang)
 
-# 6. КАБИНЕТ И ПЛАТНОЕ ВОССТАНОВЛЕНИЕ РЕЙТИНГА
-@dp.callback_query(F.data == "menu_profile")
-async def show_profile(callback: CallbackQuery):
-    uid = callback.from_user.id
-    u = users_db.get(uid, {})
-    rating = u.get("rating", 100)
-    badge = "\n⚠️ Статус: Рейтинг восстановлен за плату" if u.get("is_paid_restored") else ""
-    
-    text = f"👤 **Профиль**\n⭐ Рейтинг: {rating}/100{badge}"
-    markup = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💳 Восстановить рейтинг (Экв.)", callback_data="pay_restore")],
-        [InlineKeyboardButton(text="⬅️ Назад", callback_data="menu_back")]
-    ])
-    await callback.message.answer(text, parse_mode="Markdown", reply_markup=markup)
-    await callback.answer()
-
-@dp.callback_query(F.data == "pay_restore")
-async def pay_restore(callback: CallbackQuery):
-    uid = callback.from_user.id
-    users_db[uid]["rating"] = 100
-    users_db[uid]["is_paid_restored"] = True
-    await callback.message.answer("✅ Оплата прошла успешно! Ваш рейтинг восстановлен до 100.")
-    await show_main_menu(callback.message, uid)
-    await callback.answer()
-
-@dp.callback_query(F.data == "menu_back")
-async def menu_back(callback: CallbackQuery):
-    await show_main_menu(callback.message, callback.from_user.id)
-    await callback.answer()
-
-# 7. ПОДАЧА ГРУЗА
-@dp.callback_query(F.data == "menu_add")
-async def menu_add(callback: CallbackQuery, state: FSMContext):
-    uid = callback.from_user.id
-    lang = users_db.get(uid, {}).get("lang", "ru")
-    t = LANGS.get(lang, LANGS["ru"])
-    
-    await state.set_state(OrderState.route)
-    await callback.message.answer(t["ask_route"])
-    await callback.answer()
-
-@dp.message(OrderState.route)
-async def process_route(message: Message, state: FSMContext):
-    uid = message.from_user.id
-    lang = users_db.get(uid, {}).get("lang", "ru")
-    t = LANGS.get(lang, LANGS["ru"])
-    
-    freight_db.append({"user": uid, "route": message.text})
-    await state.clear()
-    await message.answer(t["success_post"])
-    await show_main_menu(message, uid)
-
-# 8. ПАРСИНГ ТЕЛЕГРАМ-ЧАТОВ И ВНЕШНИХ ИСТОЧНИКОВ
-@dp.message(F.text & ~F.command)
-async def parse_external_chats(message: Message):
-    text = message.text
-    uid = message.from_user.id
-    
-    # Автоматический перехват номеров телефонов из чатов (КЗ, РУЗ, КНР, РФ)
-    phone_match = re.search(r"(\+?[78][-\(\]?\d{3}\)?-?\d{3}-?\d{2}-?\d{2}|\+?998\d{9}|\+?86\d{11})", text)
-    if phone_match:
-        phone = phone_match.group(0)
-        drivers_crm[uid] = {
-            "phone": phone,
-            "username": message.from_user.username or "нет",
-            "text": text[:100]
-        }
-        logging.info(f"Парсер зафиксировал контакт: {phone} от пользователя {uid}")
-
-async def main():
-    print("Чистый запуск логистического бота...")
-    await bot.delete_webhook(drop_pending_updates=True)
-    await dp.start_polling(bot)
-
-if __name__ == "__main__":
-    asyncio.run(main())
+if __name__ == '__main__':
+    print("Запуск логистического бота...")
+    try:
+        bot.remove_webhook()
+    except:
+        pass
+    print("Бот успешно запущен и готов принимать сообщения.")
+    bot.infinity_polling(skip_pending=True)
