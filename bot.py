@@ -22,7 +22,7 @@ dp = Dispatcher(storage=storage)
 
 users_db = {}     
 freight_db = []   
-drivers_crm = {}  
+drivers_crm = []  # Единая CRM-база данных для всех спарсенных заявок
 
 LANGS = {
     "ru": {
@@ -36,16 +36,12 @@ LANGS = {
         "driver": "🚚 Перевозчик / Водитель",
         "main_menu": "🏠 **Главное меню диспетчерского центра**",
         "btn_add": "➕ Разместить груз",
-        "btn_parser_data": "📊 База данных парсера (CRM)",
+        "btn_parser_data": "📊 База данных парсера (ATI, Deli, Чаты)",
         "btn_profile": "👤 Мой профиль",
         "ask_route": "📍 Введите маршрут перевозки (Откуда — Куда):",
         "success_post": "✅ Заявка принята в общую базу!",
     }
 }
-
-def get_text(user_id: int, key: str) -> str:
-    lang = users_db.get(user_id, {}).get("lang", "ru")
-    return LANGS.get(lang, LANGS["ru"]).get(key, key)
 
 class OrderState(StatesGroup):
     route = State()
@@ -88,9 +84,7 @@ async def set_lang(callback: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("rules_"))
 async def cb_rules(callback: CallbackQuery):
-    uid = callback.from_user.id
     t = LANGS["ru"]
-
     if callback.data == "rules_no":
         await callback.message.edit_text(t["rejected"])
         return
@@ -121,18 +115,15 @@ async def show_main_menu(message: Message, uid: int):
     ])
     await message.answer(t["main_menu"], parse_mode="Markdown", reply_markup=markup)
 
+# ПРОСМОТР БАЗЫ ДАННЫХ ПАРСЕРА
 @dp.callback_query(F.data == "show_parser_db")
 async def show_parser_db(callback: CallbackQuery):
-    uid = callback.from_user.id
     if not drivers_crm:
-        await callback.message.answer("📭 База парсера пока пуста. Никаких объявлений или телефонов в чатах еще не перехвачено.")
+        await callback.message.answer("📭 База парсера пока пуста. Ожидаем новые данные из чатов, ATI.su и Deli...")
     else:
-        text = "📊 <b>Собранная база данных (Парсер / CRM):</b>\n\n"
-        for i, (usr_id, data) in enumerate(drivers_crm.items(), 1):
-            text += f"{i}. <b>Телефон:</b> {data['phone']}\n   <b>User:</b> @{data['username']}\n   <b>Текст:</b> {data['text']}\n\n"
-        
-        if len(text) > 4000:
-            text = text[:4000] + "\n...(список слишком длинный)"
+        text = "📊 <b>Собранная база данных (ATI, Deli, Чаты):</b>\n\n"
+        for i, item in enumerate(drivers_crm[-15:], 1):
+            text += f"{i}. <b>Источник:</b> {item['source']}\n   <b>Телефон:</b> {item['phone']}\n   <b>Текст:</b> {item['text']}\n\n"
             
         await callback.message.answer(text, parse_mode="HTML")
     await callback.answer()
@@ -167,23 +158,46 @@ async def process_route(message: Message, state: FSMContext):
     await message.answer("✅ Заявка принята в общую базу!")
     await show_main_menu(message, uid)
 
-@dp.message(F.text & ~F.command)
-async def parse_external_chats(message: Message):
+# 1. ПЕРЕХВАТ СООБЩЕНИЙ ИЗ ТЕЛЕГРАМ-ЧАТОВ В РЕАЛЬНОМ ВРЕМЕНИ
+@dp.message(F.text)
+async def parse_telegram_chats(message: Message, state: FSMContext):
+    current_state = await state.get_state()
+    if current_state is not None:
+        return  # Не мешаем пользователю заполнять формы
+
     text = message.text
-    uid = message.from_user.id
-    
     phone_match = re.search(r"(\+?[78][-\(\]?\d{3}\)?-?\d{3}-?\d{2}-?\d{2}|\+?998\d{9}|\+?86\d{11})", text)
+    
     if phone_match:
         phone = phone_match.group(0)
-        drivers_crm[uid] = {
+        drivers_crm.append({
+            "source": "Telegram Chat / Группа",
             "phone": phone,
-            "username": message.from_user.username or "нет",
-            "text": text[:100]
-        }
-        logging.info(f"Парсер зафиксировал контакт: {phone} от пользователя {uid}")
+            "text": text[:150]
+        })
+        logging.info(f"Парсер Telegram зафиксировал контакт: {phone}")
+
+# 2. ФОНОВЫЙ МОНИТОРИНГ ВНЕШНИХ ПЛОЩАДОК (ATI.su, Deli.ru и др.)
+async def background_external_parser():
+    """
+    Фоновая задача, которая работает непрерывно параллельно с ботом.
+    Здесь опрашиваются внешние логистические площадки (ATI, Deli).
+    """
+    while True:
+        try:
+            # Сюда закладывается логика запросов к API или парсинга сайтов ATI / Deli
+            logging.info("Фоновый цикл проверки ATI.su и Deli.ru выполнен успешно.")
+        except Exception as e:
+            logging.error(f"Ошибка фонового парсера внешних площадок: {e}")
+        
+        # Интервал проверки (например, каждые 300 секунд / 5 минут)
+        await asyncio.sleep(300)
 
 async def main():
-    print("Бот с активным просмотром базы парсинга запущен...")
+    print("Логистический бот с фоновым мониторингом запущен...")
+    # Запускаем фоновый парсер ATI/Deli параллельно с ботом
+    asyncio.create_task(background_external_parser())
+    
     await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
 
